@@ -2,6 +2,10 @@ library('tidytransit')
 library('dplyr')
 library('lubridate')
 library('tidyr')
+library('rstudioapi')
+
+current_path <- getActiveDocumentContext()$path 
+setwd(dirname(current_path))
 
 # Reference: https://developers.google.com/transit/gtfs/reference/
 
@@ -18,11 +22,11 @@ tripTime <- ct$stop_times %>%
   spread(key, arrival_time) %>%
   mutate(trip_duration = period_to_seconds(hms(end)) - period_to_seconds(hms(start)))
 
-write.csv(tripTime, "tripTime.csv")
+write.csv(tripTime, paste(dirname(current_path),"/data/bus/tripTime.csv", sep = ""))
 
 routes <- ct$trips %>%
   left_join(tripTime, by = "trip_id") %>%
   group_by(route_id, service_id) %>%
   mutate(dwell_minutes = 1440 - (max(period_to_seconds(hms(end))) - min(period_to_seconds(hms(start)))) / 60, driving_minutes = sum(trip_duration/60), total_dist = sum(distance))
 
-write.csv(routes, "routes.csv")
+write.csv(routes, paste(dirname(current_path),"/data/bus/routes.csv", sep = ""))
