@@ -15,7 +15,6 @@ setwd(dirname(current_path))
 
 # Reference: https://developers.google.com/transit/gtfs/reference/
 
-# ctbus <- read_gtfs("https://www.cttransit.com/sites/default/files/gtfs/googlect_transit.zip")
 stop_times <- read_csv(paste(dirname(current_path),"/data/bus/stop_times.txt", sep = ""))
 # Remove trips without arrival time info
 stop_times_nona <- stop_times[!is.na(stop_times$arrival_time), ]
@@ -41,31 +40,18 @@ write.csv(tripTime, paste(dirname(current_path),"/data/bus/tripTime.csv", sep = 
 ## Note: multiple buses may be running the same route at the same time (see block_id)
 routes <- trips %>%
   inner_join(tripTime, by = "trip_id") %>%
-  group_by(route_id, service_id, block_id, shape_id) %>%
-  mutate(dwell_minutes = 1440 - (max(period_to_seconds(hms(end))) - min(period_to_seconds(hms(start)))) / 60, total_driving_minutes = sum(trip_duration/60), total_miles = sum(distance)) 
-  # distinct(route_id, service_id, block_id, dwell_minutes, total_driving_minutes, total_dist)
+  group_by(service_id, block_id) %>%
+  mutate(start_seconds = min(period_to_seconds(hms(start))), end_seconds = max(period_to_seconds(hms(end))), dwell_minutes = 1440 - (max(period_to_seconds(hms(end))) - min(period_to_seconds(hms(start)))) / 60, total_driving_minutes = sum(trip_duration/60), total_miles = sum(distance)) %>% 
+  distinct(service_id, block_id, start_seconds, end_seconds, dwell_minutes, total_driving_minutes, total_miles)
 
-# collapse rows with same days of week to avoid double counting of miles 
 routes$service_id <- recode(routes$service_id, "1"="wk", "10"="wk", "14"="wk", "22"="wk", 
                             "6"="wk", "11"="sat", "15"="sat", "2"="sat", "23"="sat", "7"="sat",
                             "12"="sun", "16"="sun", "24"="sun", "3"="sun", "8"="sun",
                             "13"="none", "17"="none", "25"="none", "4"="none", "9"="none")
-routes_min_max <- routes %>%
-  filter(service_id!="none") %>%
-  # group_by(route_id, service_id, block_id) %>%
-  # arrange(desc(total_dist)) %>%
-  group_by(route_id, shape_id) %>%
-  # distinct(route_id, block_id, dwell_minutes, total_driving_minutes, total_dist) %>%
-  summarise(min_dwell_minutes = min(dwell_minutes, na.rm = TRUE),
-            max_dwell_minutes = max(dwell_minutes, na.rm = TRUE),
-            min_total_driving_minutes = min(total_driving_minutes, na.rm = TRUE),
-            max_total_driving_minutes = max(total_driving_minutes, na.rm = TRUE),
-            min_total_miles = min(total_miles, na.rm = TRUE),
-            max_total_miles = max(total_miles, na.rm = TRUE)) %>%
-  ungroup() %>%
-  mutate(id=1:n())
+# Remove rows that have no service on any day
+routes <- routes %>% filter(service_id!="none")
 
-write.csv(routes_min_max, paste(dirname(current_path),"/data/bus/routes.csv", sep = ""))
+write.csv(routes, paste(dirname(current_path),"/data/bus/routes.csv", sep = ""))
 
 # Join route geometries to block groups 
 routeGeom <- shapes %>% 
