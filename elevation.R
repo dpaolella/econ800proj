@@ -1,3 +1,7 @@
+#install.packages(c("tidytransit","tidyverse","lubridate",
+#                   "rstudioapi","sf","spData","tmap",
+#                   "stringr","elevatr"))
+library(elevatr)
 library(tidytransit)
 library(tidyverse)
 library(lubridate)
@@ -17,8 +21,27 @@ setwd(dirname(current_path))
 
 shapes <- read_csv(paste(dirname(current_path),"/data/bus/shapes.txt", sep = ""))
 
+#reorder so coordinates are first for elavatr
+shapes %>% 
+  rename(
+    y = shape_pt_lat,
+    x = shape_pt_lon ) %>%
+  select(
+    x, y, everything())
 
-# Join route geometries to block groups 
+#convert to data frame so elevatr works
+shapes <- data.frame(shapes)
+# set projection
+prj_dd <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+
+#add elevation as "z" coordinate to points using USGS Elevation Point Query Service
+#note: need to do it in batches so server doesn't time out and crash
+i <- 0
+while i < nrow(shapes):
+  
+shapes_elev <- get_elev_point(shapes, prj = prj_dd, src = "epqs")
+
+# Convert lat/lons to points and set CRS
 routeGeom <- shapes %>% 
   st_as_sf(coords = c("shape_pt_lon", "shape_pt_lat")) %>% # set coordinates
   st_set_crs(4326) # set geographic CRS
@@ -28,7 +51,7 @@ routeGeom <- st_transform(routeGeom, 2234)
 routePoints<- shapes %>% 
   st_as_sf(coords = c("shape_pt_lon", "shape_pt_lat")) %>% # set coordinates
   st_set_crs(4326) %>% # set geographic CRS
-  arrange(shape_id, shape_pt_sequence) %>%
+  arrange(shape_id, pt_sequence) %>%
   mutate(group = match(shape_id, unique(shape_id)))
 routePoints <- st_transform(routePoints, 2234)
 
@@ -50,14 +73,4 @@ routeLines <- routeLines %>%
   cbind(unique(routePoints$shape_id)) %>%
   rename(shape_id=unique.routePoints.shape_id.)
 
-routes_vulnLocs_join <- routeLines %>%
-  st_join(vulnLocs, join=st_is_within_distance, dist=1640.42) # within distance of 500 meters
 
-# Tally up nearby vulnerable locations for each route
-routes_vulnLocs_tally <- routes_vulnLocs_join %>%
-  group_by(shape_id, type) %>%
-  tally() %>%
-  spread(type, n) %>%
-  replace_na(list(childcare=0, hospitals=0, nursing=0, schools=0, seniorcenters=0)) %>%
-  select(shape_id, childcare, hospitals, nursing, schools, seniorcenters) %>%
-  mutate(total=childcare+hospitals+nursing+schools+seniorcenters)
