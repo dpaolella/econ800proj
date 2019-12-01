@@ -22,7 +22,7 @@ setwd(dirname(current_path))
 shapes <- read_csv(paste(dirname(current_path),"/data/bus/shapes.txt", sep = ""))
 
 #reorder so coordinates are first for elavatr
-shapes %>% 
+shapes <- shapes %>% 
   rename(
     y = shape_pt_lat,
     x = shape_pt_lon ) %>%
@@ -36,41 +36,40 @@ prj_dd <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
 
 #add elevation as "z" coordinate to points using USGS Elevation Point Query Service
 #note: need to do it in batches so server doesn't time out and crash
-i <- 0
-while i < nrow(shapes):
-  
-shapes_elev <- get_elev_point(shapes, prj = prj_dd, src = "epqs")
-
-# Convert lat/lons to points and set CRS
-routeGeom <- shapes %>% 
-  st_as_sf(coords = c("shape_pt_lon", "shape_pt_lat")) %>% # set coordinates
-  st_set_crs(4326) # set geographic CRS
-routeGeom <- st_transform(routeGeom, 2234)
-
-# Convert route points to route lines
-routePoints<- shapes %>% 
-  st_as_sf(coords = c("shape_pt_lon", "shape_pt_lat")) %>% # set coordinates
-  st_set_crs(4326) %>% # set geographic CRS
-  arrange(shape_id, pt_sequence) %>%
-  mutate(group = match(shape_id, unique(shape_id)))
-routePoints <- st_transform(routePoints, 2234)
-
-for (i in unique(routePoints$group)) {
-  x_coords = st_coordinates(filter(routePoints, group==i))[,1]
-  y_coords = st_coordinates(filter(routePoints, group==i))[,2]
-  m = matrix(append(x_coords, y_coords), ncol=2)
-  linestring = st_cast(st_multipoint(m), "LINESTRING")
-  if (i==1) {
-    routeLines <- st_sf(geom = st_sfc(linestring, crs = 2234))
-  }
-  if (i>1) {
-    routeLines <- rbind(routeLines,st_sf(geom = st_sfc(linestring, crs = 2234)))
-  }
+elevation_list <- list()
+#shapes_elev <- data.frame(get_elev_point(shapes[0:500,],prj = prj_dd, src = "epqs"))
+i <- 0#501
+while (i < nrow(shapes)/100) {
+  tryCatch(
+    expr = {
+      temp <- data.frame(get_elev_point(shapes[(i*100):(i*100+100),], prj = prj_dd, src = "epqs"))
+      elevation_list[[i+1]] <- temp
+      i <- i + 1
+      message("Appended round to list: ", i)
+    },
+    error = function(e){
+      message("Caught an error on iteration: ", i)
+    }
+)
 }
 
-routeLines <- routeLines %>%
-  mutate(group=1:length(routeLines$geom)) %>%
-  cbind(unique(routePoints$shape_id)) %>%
-  rename(shape_id=unique.routePoints.shape_id.)
+shapes_elev = data.table::rbindlist(elevation_list)
+shapes_elev %>% distinct()
+# Group by route 
+route_elev <- shapes_elev %>% 
+  arrange(shape_id, pt_sequence) %>%
+  mutate(delta = elevation - lag(elevation, default = first(elevation)))
+
+write.csv(route_elev, paste(dirname(current_path),"/data/bus/elevation.csv", sep = ""))
+
+elev_sum <- route_elev %>%
+  group_by(shape_id) %>%
+  summarise(Positive = sum(delta[delta>0]), Negative = sum(delta[delta <0]))
+
+
+write.csv(elev_sum, paste(dirname(current_path),"/data/bus/elevationsummary.csv", sep = ""))
+
+boxplot(elev_sum['Positive'], col="#69b3a2", ylab = "Meters", main = "Elevation Gain by Route (Meters)")
+
 
 
